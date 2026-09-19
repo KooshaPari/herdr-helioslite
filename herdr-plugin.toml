@@ -1,0 +1,38 @@
+[plugin]
+name        = "herdr-helioslite"
+version     = "0.1.0"
+author      = "KooshaPari"
+description = "Herdr plugin for HeliosLite (AI pair-programmer CLI). Wraps the stock helioslite binary and reports lifecycle events (start / turn_end / error / end) to the Herdr daemon. No fork of HeliosLite required."
+entrypoint  = "bin/herdr-helioslite-report"
+homepage    = "https://github.com/KooshaPari/herdr-helioslite"
+license     = "MIT"
+
+# Platform support. Each platform points at the same bash entrypoint; the script
+# itself handles OS-specific path/extension handling (see cross_platform_exec).
+[platforms]
+macos   = "bin/herdr-helioslite-report"
+linux   = "bin/herdr-helioslite-report"
+windows = "bin/herdr-helioslite-report"  # git-bash / msys / WSL only
+
+# Lifecycle hooks → entrypoint subcommand. Herdr invokes these by name when
+# observing pane lifecycle transitions. The script maps each to a Herdr state
+# and emits pane.report_agent.
+[actions]
+session_start = "bin/herdr-helioslite-report report session_start"
+turn_start    = "bin/herdr-helioslite-report report turn_start"
+turn_end      = "bin/herdr-helioslite-report report turn_end"
+error         = "bin/herdr-helioslite-report report error"
+blocked       = "bin/herdr-helioslite-report report blocked"
+session_end   = "bin/herdr-helioslite-report report session_end"
+
+# Detection rule location (relative to plugin repo root). Herdr's pane detector
+# loads this on install to recognise HeliosLite TUI panes by screen content.
+[detection]
+rules = "agent-detection/helioslite.toml"
+
+[requires]
+# HeliosLite is OPTIONAL — the plugin ships a "not installed" advisory path
+# rather than failing hard. Users can install it later and the plugin picks up
+# the binary from PATH automatically.
+harness = { name = "helioslite", optional = true, hint = "Install HeliosLite (https://github.com/KooshaPari/HeliosLite) and ensure `helioslite` is on PATH." }
+herdr   = ">=0.5.0"
