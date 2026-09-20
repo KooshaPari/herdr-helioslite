@@ -72,28 +72,22 @@ emit_state() {
     return 0
   fi
 
-  local args=(
-    api call pane.report_agent
-    "pane_id=${HERDR_PANE_ID}"
-    "source=${SOURCE_TAG}"
-    "agent=${AGENT_NAME}"
-    "state=${state}"
-  )
-  if [[ -n "$message" ]]; then
-    args+=("message=${message}")
-  fi
-  if [[ -n "${HERDR_WORKSPACE_ID:-}" ]]; then
-    args+=("workspace_id=${HERDR_WORKSPACE_ID}")
-  fi
-
   # If herdr CLI is missing or fails, never block the host pane.
   if ! command -v "$HERDR_API" >/dev/null 2>&1; then
     log "herdr CLI not found on PATH (state=${state} message=${message:-<none>})"
     return 0
   fi
 
-  if ! "$HERDR_API" "${args[@]}" >/dev/null 2>&1; then
-    log "herdr call failed (state=${state})"
+  # Real Herdr CLI surface (per `herdr pane report-agent --help`):
+  #   herdr pane report-agent <PANE_ID>
+  #     --source <ID> --agent <LABEL> --state <STATUS>
+  #     [--message <TEXT>] [--seq <N>]
+  if ! "$HERDR_API" pane report-agent "$HERDR_PANE_ID" \
+      --source "$SOURCE_TAG" \
+      --agent "$AGENT_NAME" \
+      --state "$state" \
+      --message "$message" >/dev/null 2>&1; then
+    log "herdr pane report-agent failed (state=${state})"
   fi
   return 0
 }
@@ -140,7 +134,9 @@ cmd_status() {
 
 cmd_ping() {
   if command -v "$HERDR_API" >/dev/null 2>&1; then
-    if "$HERDR_API" api call daemon.ping >/dev/null 2>&1; then
+    # `herdr status server` is the canonical liveness probe (works against a
+    # running daemon; falls back gracefully if the daemon is offline).
+    if "$HERDR_API" status server >/dev/null 2>&1; then
       printf 'pong\n'
       return 0
     fi
@@ -148,6 +144,32 @@ cmd_ping() {
     return 0
   fi
   printf 'no-cli\n'
+}
+
+cmd_doctor() {
+  # Smoke-check the integration end-to-end: resolve the host binary, ping the
+  # Herdr daemon, emit a synthetic session_start. Failures are advisory, not
+  # fatal — the host pane must still come up.
+  local bin
+  bin="$(resolve_helioslite_bin)"
+
+  local bin_msg="(not installed)"
+  if [[ -n "$bin" ]]; then
+    bin_msg="at ${bin}"
+  fi
+
+  local ping_msg
+  ping_msg="$(cmd_ping)"
+  case "$ping_msg" in
+    pong)        ping_msg="reachable" ;;
+    no-daemon)   ping_msg="herdr daemon unreachable" ;;
+    no-cli)      ping_msg="herdr cli not on PATH" ;;
+    *)           ping_msg="unknown (${ping_msg})" ;;
+  esac
+
+  emit_state "working" "doctor: helioslite ${bin_msg}, ${ping_msg}"
+  cmd_report "session_start" "doctor run at $(date -u +%FT%TZ)"
+  emit_state "idle" "doctor complete"
 }
 
 # Probe a pane snapshot for HeliosLite screen markers. Used by Herdr's pane
@@ -184,6 +206,7 @@ usage() {
 Usage:
   $0 report <event> [message]   Emit a HeliosLite lifecycle event
   $0 status                     Emit a presence ping (idle) with install status
+  $0 doctor                     Smoke-check the integration end-to-end
   $0 ping                       Check the Herdr daemon is reachable
   $0 detect [--path FILE]       Probe text for HeliosLite markers
 
@@ -198,6 +221,7 @@ main() {
   case "$sub" in
     report)  cmd_report "$@" ;;
     status)  cmd_status ;;
+    doctor)  cmd_doctor ;;
     ping)    cmd_ping ;;
     detect)  cmd_detect "$@" ;;
     -h|--help|help|"") usage ;;
